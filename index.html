@@ -6,7 +6,6 @@
   <title>ATR-66 PLC – Tarjeta</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
-  <!-- Agregar SheetJS para exportar a Excel -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <style>
     :root {
@@ -180,9 +179,276 @@
       margin-bottom: 8px;
     }
   </style>
+</head>
+<body>
 
-  <script>
+<article class="card">
+  <img src="https://ceneris.com/wp-content/uploads/2021/05/logo-ceneris-300.png" alt="Logo Empresa" class="logo-empresa" />
+
+  <div class="card-header">
+    <h1 id="nombre-plc">ATR-66 PLC</h1>
+    <button class="edit-btn" onclick="editarCampo('nombre-plc')">✏️</button>
+    <span class="badge" id="numero-plc">959312882</span>
+    <button class="edit-btn" onclick="editarCampo('numero-plc')">✏️</button>
+  </div>
+
+  <div class="additional-fields" id="campos-adicionales"></div>
+
+  <p class="label">Último mantenimiento:
+    <span class="value success" id="ultimo-mantenimiento">15/06/2025</span>
+    <button class="edit-btn" onclick="editarCampo('ultimo-mantenimiento')">✏️</button>
+  </p>
+
+  <p class="label">PakBus:
+    <span class="value" id="pakbus">784</span>
+    <button class="edit-btn" onclick="editarCampo('pakbus')">✏️</button>
+  </p>
+
+  <hr />
+  <p class="label">Equipos instalados:</p>
+  <ul class="list" id="lista-equipos"></ul>
+
+  <hr />
+  <div class="card-footer">
+    <a href="#" class="btn btn-primary" id="btn-certificado"><i class="fa-solid fa-file-contract"></i> Certificado</a>
+    <a href="#" class="btn btn-outline" id="btn-diagrama"><i class="fa-solid fa-diagram-project"></i> Diagrama</a>
+    <a href="#" class="btn btn-outline" id="btn-manual"><i class="fa-solid fa-book"></i> Manual</a>
+    <a href="#" class="btn btn-outline" id="btn-especificaciones"><i class="fa-solid fa-gears"></i> Especificaciones</a>
+  </div>
+
+  <button class="btn-toggle-edit" onclick="toggleModoEdicion()">✏️ Editar</button>
+  <button class="btn-save" onclick="guardarCambios()">💾 Guardar cambios</button>
+  <button class="btn-export" onclick="exportarAExcel()"><i class="fas fa-file-excel"></i> Exportar a Excel</button>
+</article>
+
+<script>
+    // =============================================
+    // REPOSITORIOS PARA INDEXEDDB
+    // =============================================
+
+    class Database {
+      constructor(name, version) {
+        this.name = name;
+        this.version = version;
+        this.db = null;
+      }
+
+      async open() {
+        return new Promise((resolve, reject) => {
+          const request = indexedDB.open(this.name, this.version);
+          
+          request.onerror = (event) => {
+            console.error("Error al abrir la base de datos:", event.target.error);
+            reject(event.target.error);
+          };
+          
+          request.onsuccess = (event) => {
+            this.db = event.target.result;
+            resolve(this.db);
+          };
+          
+          request.onupgradeneeded = (event) => {
+            const db = event.target.result;
+            
+            // Crear object store para los datos principales
+            if (!db.objectStoreNames.contains('mainData')) {
+              db.createObjectStore('mainData', { keyPath: 'id' });
+            }
+            
+            // Crear object store para equipos
+            if (!db.objectStoreNames.contains('equipos')) {
+              db.createObjectStore('equipos', { keyPath: 'id', autoIncrement: true });
+            }
+            
+            // Crear object store para campos adicionales
+            if (!db.objectStoreNames.contains('camposAdicionales')) {
+              db.createObjectStore('camposAdicionales', { keyPath: 'id', autoIncrement: true });
+            }
+            
+            // Crear object store para enlaces
+            if (!db.objectStoreNames.contains('links')) {
+              db.createObjectStore('links', { keyPath: 'name' });
+            }
+          };
+        });
+      }
+
+      async close() {
+        if (this.db) {
+          this.db.close();
+          this.db = null;
+        }
+      }
+    }
+
+    class MainDataRepository {
+      constructor(db) {
+        this.db = db;
+        this.storeName = 'mainData';
+      }
+
+      async get(id = 1) {
+        return new Promise((resolve, reject) => {
+          const transaction = this.db.transaction([this.storeName], 'readonly');
+          const store = transaction.objectStore(this.storeName);
+          const request = store.get(id);
+          
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = (event) => reject(event.target.error);
+        });
+      }
+
+      async save(data) {
+        return new Promise((resolve, reject) => {
+          const transaction = this.db.transaction([this.storeName], 'readwrite');
+          const store = transaction.objectStore(this.storeName);
+          const request = store.put(data);
+          
+          request.onsuccess = () => resolve();
+          request.onerror = (event) => reject(event.target.error);
+        });
+      }
+    }
+
+    class EquiposRepository {
+      constructor(db) {
+        this.db = db;
+        this.storeName = 'equipos';
+      }
+
+      async getAll() {
+        return new Promise((resolve, reject) => {
+          const transaction = this.db.transaction([this.storeName], 'readonly');
+          const store = transaction.objectStore(this.storeName);
+          const request = store.getAll();
+          
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = (event) => reject(event.target.error);
+        });
+      }
+
+      async clear() {
+        return new Promise((resolve, reject) => {
+          const transaction = this.db.transaction([this.storeName], 'readwrite');
+          const store = transaction.objectStore(this.storeName);
+          const request = store.clear();
+          
+          request.onsuccess = () => resolve();
+          request.onerror = (event) => reject(event.target.error);
+        });
+      }
+
+      async add(equipo) {
+        return new Promise((resolve, reject) => {
+          const transaction = this.db.transaction([this.storeName], 'readwrite');
+          const store = transaction.objectStore(this.storeName);
+          const request = store.add({ value: equipo });
+          
+          request.onsuccess = () => resolve();
+          request.onerror = (event) => reject(event.target.error);
+        });
+      }
+
+      async addAll(equipos) {
+        await this.clear();
+        for (const equipo of equipos) {
+          await this.add(equipo);
+        }
+      }
+    }
+
+    class CamposAdicionalesRepository {
+      constructor(db) {
+        this.db = db;
+        this.storeName = 'camposAdicionales';
+      }
+
+      async getAll() {
+        return new Promise((resolve, reject) => {
+          const transaction = this.db.transaction([this.storeName], 'readonly');
+          const store = transaction.objectStore(this.storeName);
+          const request = store.getAll();
+          
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = (event) => reject(event.target.error);
+        });
+      }
+
+      async clear() {
+        return new Promise((resolve, reject) => {
+          const transaction = this.db.transaction([this.storeName], 'readwrite');
+          const store = transaction.objectStore(this.storeName);
+          const request = store.clear();
+          
+          request.onsuccess = () => resolve();
+          request.onerror = (event) => reject(event.target.error);
+        });
+      }
+
+      async add(campo) {
+        return new Promise((resolve, reject) => {
+          const transaction = this.db.transaction([this.storeName], 'readwrite');
+          const store = transaction.objectStore(this.storeName);
+          const request = store.add(campo);
+          
+          request.onsuccess = () => resolve();
+          request.onerror = (event) => reject(event.target.error);
+        });
+      }
+
+      async addAll(campos) {
+        await this.clear();
+        for (const campo of campos) {
+          await this.add(campo);
+        }
+      }
+    }
+
+    class LinksRepository {
+      constructor(db) {
+        this.db = db;
+        this.storeName = 'links';
+      }
+
+      async getAll() {
+        return new Promise((resolve, reject) => {
+          const transaction = this.db.transaction([this.storeName], 'readonly');
+          const store = transaction.objectStore(this.storeName);
+          const request = store.getAll();
+          
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = (event) => reject(event.target.error);
+        });
+      }
+
+      async save(link) {
+        return new Promise((resolve, reject) => {
+          const transaction = this.db.transaction([this.storeName], 'readwrite');
+          const store = transaction.objectStore(this.storeName);
+          const request = store.put(link);
+          
+          request.onsuccess = () => resolve();
+          request.onerror = (event) => reject(event.target.error);
+        });
+      }
+
+      async saveAll(links) {
+        for (const [name, url] of Object.entries(links)) {
+          await this.save({ name, url });
+        }
+      }
+    }
+
+    // =============================================
+    // APLICACIÓN PRINCIPAL
+    // =============================================
+
     let modoEdicion = false;
+    let dbInstance;
+    let mainDataRepo;
+    let equiposRepo;
+    let camposRepo;
+    let linksRepo;
     const links = {
       certificado: "#",
       diagrama: "#",
@@ -190,42 +456,99 @@
       especificaciones: "#"
     };
 
-    window.onload = function () {
-      const campos = ["nombre-plc", "numero-plc", "pakbus", "ultimo-mantenimiento"];
-      campos.forEach(id => {
-        const valor = localStorage.getItem(id);
-        if (valor) document.getElementById(id).innerText = valor;
-      });
+    // Inicializar la aplicación
+    async function initApp() {
+      try {
+        // Inicializar la base de datos y los repositorios
+        const db = new Database('ATRDatabase', 1);
+        dbInstance = await db.open();
+        
+        mainDataRepo = new MainDataRepository(dbInstance);
+        equiposRepo = new EquiposRepository(dbInstance);
+        camposRepo = new CamposAdicionalesRepository(dbInstance);
+        linksRepo = new LinksRepository(dbInstance);
+        
+        // Cargar datos iniciales
+        await loadInitialData();
+      } catch (error) {
+        console.error("Error inicial:", error);
+        // Mostrar datos por defecto
+        showDefaultData();
+      }
+    }
 
-      const equipos = JSON.parse(localStorage.getItem("lista-equipos"));
-      if (equipos) renderizarEquipos(equipos);
-      else renderizarEquipos([
+    // Cargar datos iniciales desde IndexedDB
+    async function loadInitialData() {
+      try {
+        // Cargar datos principales
+        const mainData = await mainDataRepo.get(1);
+        if (mainData) {
+          document.getElementById('nombre-plc').innerText = mainData.nombrePLC || 'ATR-66 PLC';
+          document.getElementById('numero-plc').innerText = mainData.numeroPLC || '959312882';
+          document.getElementById('pakbus').innerText = mainData.pakbus || '784';
+          document.getElementById('ultimo-mantenimiento').innerText = mainData.ultimoMantenimiento || '15/06/2025';
+        }
+
+        // Cargar equipos
+        const equipos = await equiposRepo.getAll();
+        if (equipos && equipos.length > 0) {
+          renderizarEquipos(equipos.map(e => e.value));
+        } else {
+          renderizarEquipos([
+            "Rut xxxxxxxx",
+            "campbell cr 310 xxxxxxx",
+            "Conversor RS485 stm4855",
+            "batería 12V 18Ah",
+            "Controlador solar"
+          ]);
+        }
+
+        // Cargar campos adicionales
+        const camposAdicionales = await camposRepo.getAll();
+        if (camposAdicionales && camposAdicionales.length > 0) {
+          renderizarCamposAdicionales(camposAdicionales);
+        } else {
+          renderizarCamposAdicionales([
+            { nombre: "cota", valor: "1234 m" },
+            { nombre: "nivel", valor: "2" }
+          ]);
+        }
+
+        // Cargar enlaces
+        const storedLinks = await linksRepo.getAll();
+        if (storedLinks && storedLinks.length > 0) {
+          storedLinks.forEach(link => {
+            links[link.name] = link.url;
+            document.getElementById(`btn-${link.name}`).href = link.url;
+          });
+        }
+      } catch (error) {
+        console.error("Error al cargar datos iniciales:", error);
+        showDefaultData();
+      }
+    }
+
+    function showDefaultData() {
+      document.getElementById('nombre-plc').innerText = 'ATR-66 PLC';
+      document.getElementById('numero-plc').innerText = '959312882';
+      document.getElementById('pakbus').innerText = '784';
+      document.getElementById('ultimo-mantenimiento').innerText = '15/06/2025';
+      renderizarEquipos([
         "Rut xxxxxxxx",
         "campbell cr 310 xxxxxxx",
         "Conversor RS485 stm4855",
         "batería 12V 18Ah",
         "Controlador solar"
       ]);
+      renderizarCamposAdicionales([
+        { nombre: "cota", valor: "1234 m" },
+        { nombre: "nivel", valor: "2" }
+      ]);
+    }
 
-      // Cargar campos adicionales
-      const camposAdicionales = JSON.parse(localStorage.getItem("campos-adicionales"));
-      if (camposAdicionales) {
-        renderizarCamposAdicionales(camposAdicionales);
-      } else {
-        // Campos por defecto
-        renderizarCamposAdicionales([
-          { nombre: "cota", valor: "1234 m" },
-          { nombre: "nivel", valor: "2" }
-        ]);
-      }
-
-      // Cargar links
-      for (let key in links) {
-        const guardado = localStorage.getItem("link_" + key);
-        if (guardado) links[key] = guardado;
-        document.getElementById("btn-" + key).href = links[key];
-      }
-    };
+    // =============================================
+    // FUNCIONES DE INTERFAZ DE USUARIO
+    // =============================================
 
     function toggleModoEdicion() {
       modoEdicion = !modoEdicion;
@@ -233,8 +556,12 @@
       document.querySelectorAll(".edit-btn, .del-btn").forEach(btn =>
         btn.classList.toggle("visible", modoEdicion)
       );
-      document.getElementById("add-equipo-btn").style.display = modoEdicion ? "inline" : "none";
-      document.getElementById("add-campo-btn").style.display = modoEdicion ? "inline" : "none";
+      
+      const addEquipoBtn = document.getElementById("add-equipo-btn");
+      const addCampoBtn = document.getElementById("add-campo-btn");
+      
+      if (addEquipoBtn) addEquipoBtn.style.display = modoEdicion ? "inline" : "none";
+      if (addCampoBtn) addCampoBtn.style.display = modoEdicion ? "inline" : "none";
 
       if (modoEdicion) {
         for (let key in links) {
@@ -260,7 +587,9 @@
     function editarCampo(id) {
       const el = document.getElementById(id);
       const nuevo = prompt("Editar valor:", el.innerText);
-      if (nuevo !== null && nuevo.trim() !== "") el.innerText = nuevo;
+      if (nuevo !== null && nuevo.trim() !== "") {
+        el.innerText = nuevo;
+      }
     }
 
     function renderizarEquipos(lista) {
@@ -390,26 +719,55 @@
       return campos;
     }
 
-    function guardarCambios() {
+    // =============================================
+    // FUNCIONES DE PERSISTENCIA
+    // =============================================
+
+    async function guardarCambios() {
       const clave = prompt("Ingrese la contraseña para guardar los cambios:");
-      if (clave !== "ceneris2020") {
-        alert("❌ Contraseña incorrecta.");
+      
+      // Verificación mejorada de la contraseña
+      if (clave === null) {
+        return; // El usuario canceló
+      }
+      
+      if (clave.trim() !== "ceneris2020") {
+        alert("❌ Contraseña incorrecta. La contraseña es 'ceneris2020' (sin comillas)");
         return;
       }
 
-      ["nombre-plc", "numero-plc", "pakbus", "ultimo-mantenimiento"].forEach(id => {
-        localStorage.setItem(id, document.getElementById(id).innerText);
-      });
+      try {
+        // Guardar datos principales
+        const mainData = {
+          id: 1,
+          nombrePLC: document.getElementById('nombre-plc').innerText,
+          numeroPLC: document.getElementById('numero-plc').innerText,
+          pakbus: document.getElementById('pakbus').innerText,
+          ultimoMantenimiento: document.getElementById('ultimo-mantenimiento').innerText
+        };
+        await mainDataRepo.save(mainData);
 
-      localStorage.setItem("lista-equipos", JSON.stringify(obtenerEquipos()));
-      localStorage.setItem("campos-adicionales", JSON.stringify(obtenerCamposAdicionales()));
+        // Guardar equipos
+        const equipos = obtenerEquipos();
+        await equiposRepo.addAll(equipos);
 
-      for (let key in links) {
-        localStorage.setItem("link_" + key, links[key]);
+        // Guardar campos adicionales
+        const camposAdicionales = obtenerCamposAdicionales();
+        await camposRepo.addAll(camposAdicionales);
+
+        // Guardar enlaces
+        await linksRepo.saveAll(links);
+
+        alert("✅ Cambios guardados correctamente.");
+      } catch (error) {
+        console.error("Error al guardar cambios:", error);
+        alert("❌ Error al guardar los cambios. Consulte la consola para más detalles.");
       }
-
-      alert("✅ Cambios guardados correctamente.");
     }
+
+    // =============================================
+    // FUNCIONES DE EXPORTACIÓN
+    // =============================================
 
     function exportarAExcel() {
       // Obtener todos los datos
@@ -455,48 +813,9 @@
       const nombreArchivo = `${nombrePLC.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0,10)}.xlsx`;
       XLSX.writeFile(wb, nombreArchivo);
     }
+
+    // Iniciar la aplicación cuando se cargue la página
+    window.onload = initApp;
   </script>
-</head>
-<body>
-
-<article class="card">
-  <img src="https://ceneris.com/wp-content/uploads/2021/05/logo-ceneris-300.png" alt="Logo Empresa" class="logo-empresa" />
-
-  <div class="card-header">
-    <h1 id="nombre-plc">ATR-66 PLC</h1>
-    <button class="edit-btn" onclick="editarCampo('nombre-plc')">✏️</button>
-    <span class="badge" id="numero-plc">959312882</span>
-    <button class="edit-btn" onclick="editarCampo('numero-plc')">✏️</button>
-  </div>
-
-  <div class="additional-fields" id="campos-adicionales"></div>
-
-  <p class="label">Último mantenimiento:
-    <span class="value success" id="ultimo-mantenimiento">15/06/2025</span>
-    <button class="edit-btn" onclick="editarCampo('ultimo-mantenimiento')">✏️</button>
-  </p>
-
-  <p class="label">PakBus:
-    <span class="value" id="pakbus">784</span>
-    <button class="edit-btn" onclick="editarCampo('pakbus')">✏️</button>
-  </p>
-
-  <hr />
-  <p class="label">Equipos instalados:</p>
-  <ul class="list" id="lista-equipos"></ul>
-
-  <hr />
-  <div class="card-footer">
-    <a href="#" class="btn btn-primary" id="btn-certificado"><i class="fa-solid fa-file-contract"></i> Certificado</a>
-    <a href="#" class="btn btn-outline" id="btn-diagrama"><i class="fa-solid fa-diagram-project"></i> Diagrama</a>
-    <a href="#" class="btn btn-outline" id="btn-manual"><i class="fa-solid fa-book"></i> Manual</a>
-    <a href="#" class="btn btn-outline" id="btn-especificaciones"><i class="fa-solid fa-gears"></i> Especificaciones</a>
-  </div>
-
-  <button class="btn-toggle-edit" onclick="toggleModoEdicion()">✏️ Editar</button>
-  <button class="btn-save" onclick="guardarCambios()">💾 Guardar cambios</button>
-  <button class="btn-export" onclick="exportarAExcel()"><i class="fas fa-file-excel"></i> Exportar a Excel</button>
-</article>
-
 </body>
 </html>
